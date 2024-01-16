@@ -2,16 +2,20 @@
 
 namespace badapple;
 
+use badapple\video\VideoFrame;
+use pocketmine\level\format\anvil\Chunk;
 use pocketmine\level\format\anvil\ChunkSection;
-use pocketmine\nbt\tag\{StringTag, IntTag, ByteTag, FloatTag, CompoundTag};
+use pocketmine\nbt\tag\{StringTag, IntTag, CompoundTag};
+use pocketmine\network\protocol\FullChunkDataPacket;
 
 class ChunkGenerator
 {
-	public static function getSections(bool $recompute)
+
+	public static function createEmptySections(int $count)
 	{
 		$sections = [];
 
-		for ($y = 0; $y < 8; $y++) {
+		for ($y = 0; $y < $count; $y++) {
 			$nbt = new CompoundTag("", [
 				new IntTag("Y", $y),
 				new StringTag("Blocks", str_repeat("\x00", 4096)),
@@ -26,52 +30,107 @@ class ChunkGenerator
 		return $sections;
 	}
 
-	public static function generateChunkFromColors(
-		array $colors,
-		int $slice,
-		int $w = 128,
-		int $h = 128,
-		bool $recompute = false
-	) {
-		$sections = self::getSections($recompute);
+	// public static function generateChunkFromColors(
+	// 	array $colors,
+	// 	int $slice,
+	// 	int $w = 128,
+	// 	int $h = 128
+	// ) {
+	// 	$sections = self::createEmptySections($w >> 4 /* divided by 16; the size of a chunk */);
+	//
+	// 	for ($dx = 0; $dx < 16; $dx++) {
+	// 		$x = $dx + 16 * $slice;
+	//
+	// 		for ($y = 0; $y < $h; $y++) {
+	// 			$section = $sections[$y >> 4] ?? null;
+	//
+	// 			if (!$section) {
+	// 				continue;
+	// 			}
+	//
+	// 			$section->setBlock($dx, $y & 0x0f, 0, $colors[$x][$h - $y], 0);
+	// 		}
+	// 	}
+	//
+	// 	return self::generateFullChunkData($sections);
+	// }
 
-		for ($dx = 0; $dx < 16; $dx++) {
-			$x = $dx + 16 * $slice;
-			for ($y = 0; $y < $h; $y++) {
-				$section = $sections[$y >> 4] ?? null;
+	/** @return string[] */
+	public static function generateChunksFromVideoFrame(VideoFrame $frame)
+	{
+		$buffers = [];
 
-				if (!$section) {
-					continue;
+		$data = $frame->getData();
+		$width = $frame->getWidth();
+		$height = $frame->getHeight();
+		$sliceCount = $frame->getSliceCount();
+
+		for ($slice = 0; $slice < $sliceCount; $slice++) {
+			$sections = self::createEmptySections($width >> 4 /* divided by 16; the size of a chunk */);
+
+			for ($x = 0; $x < 16; $x++) {
+				$dx = $x + (16 * $slice);
+
+				for ($y = 0; $y < $height; $y++) {
+					$section = $sections[$y >> 4] ?? null;
+
+					if (!$section)
+						continue;
+
+					$dy = ($height - (1 + $y));
+
+					$column = $data[$dx];
+
+					if (!isset($column[$dy])) {
+						continue;
+					}
+
+					$id = $column[$dy];
+
+					$section->setBlockId($x, $y & 0x0f, 0, $id);
 				}
-
-				$section->setBlock(
-					$dx,
-					$y & 0x0f,
-					0,
-					$colors[$x][$h - ($y + 1)],
-					0
-				);
 			}
+
+			$buffer = ChunkGenerator::generateFullChunkData($sections);
+
+			$buffers[$slice] = $buffer;
 		}
 
+		return $buffers;
+	}
+
+	public static function generateFullChunkData(array $chunkSections)
+	{
 		$buffer = "";
 
-		for ($y = 0; $y < 8; ++$y) {
-			$buffer .= $sections[$y]->getIdArray();
+		for ($y = 0; $y < Chunk::SECTION_COUNT; ++$y) {
+			$buffer .= $chunkSections[$y]->getIdArray();
 		}
 
-		for ($y = 0; $y < 8; ++$y) {
-			$buffer .= $sections[$y]->getDataArray();
+		for ($y = 0; $y < Chunk::SECTION_COUNT; ++$y) {
+			$buffer .= $chunkSections[$y]->getDataArray();
 		}
 
-		for ($y = 0; $y < 8; ++$y) {
-			$buffer .= $sections[$y]->getSkyLightArray();
+		for ($y = 0; $y < Chunk::SECTION_COUNT; ++$y) {
+			$buffer .= $chunkSections[$y]->getSkyLightArray();
 		}
 
-		for ($y = 0; $y < 8; ++$y) {
-			$buffer .= $sections[$y]->getLightArray();
+		for ($y = 0; $y < Chunk::SECTION_COUNT; ++$y) {
+			$buffer .= $chunkSections[$y]->getLightArray();
 		}
 
 		return $buffer;
+	}
+
+	public static function generateChunkPacket(int $x, int $z, string $data)
+	{
+		$pk = new FullChunkDataPacket();
+
+		$pk->chunkX = $x;
+		$pk->chunkZ = $z;
+		$pk->order = $pk::ORDER_LAYERED;
+		$pk->data = $data;
+
+		return $pk;
 	}
 }
