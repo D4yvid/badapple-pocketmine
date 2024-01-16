@@ -1,0 +1,4 @@
+name: BadApple
+api: 2.0.0
+main: badapple\Main
+version: Bad
