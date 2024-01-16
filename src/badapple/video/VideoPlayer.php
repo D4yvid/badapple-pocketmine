@@ -57,6 +57,8 @@ class VideoPlayer
 
 	public function play()
 	{
+		$this->running = true;
+
 		$this->taskHandle = $this
 			->getTarget()
 			->getServer()
